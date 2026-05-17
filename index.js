@@ -2,6 +2,7 @@ import fs from "fs";
 import https from "https";
 import dotenv from "dotenv";
 import OpenAI from "openai";
+import { uploadToCloudinary } from "./uploadImage.js";
 
 dotenv.config();
 
@@ -10,19 +11,12 @@ const client = new OpenAI({
   apiKey: process.env.OPENROUTER_API_KEY
 });
 
-// load all themes
+// load themes
 const themes = fs.readFileSync("./themes-1m.txt", "utf-8")
   .split("\n")
   .filter(Boolean);
 
-const folder = "./images";
-
-if (!fs.existsSync(folder)) {
-  fs.mkdirSync(folder);
-}
-
-let imageCount = 1;
-
+// random theme picker
 function getRandomTheme() {
   return themes[Math.floor(Math.random() * themes.length)];
 }
@@ -43,23 +37,33 @@ async function generatePrompt() {
   return response.choices[0].message.content;
 }
 
-function generateImage(prompt) {
+// download → upload → delete temp file
+async function generateImage(prompt) {
   return new Promise((resolve, reject) => {
     const encodedPrompt = encodeURIComponent(prompt);
-
-    const fileName = `${folder}/image-${imageCount++}-${Date.now()}.png`;
+    const tempFile = `temp-${Date.now()}.png`;
 
     const url = `https://image.pollinations.ai/prompt/${encodedPrompt}`;
 
-    https.get(url, (res) => {
-      const file = fs.createWriteStream(fileName);
+    const file = fs.createWriteStream(tempFile);
 
+    https.get(url, (res) => {
       res.pipe(file);
 
-      file.on("finish", () => {
+      file.on("finish", async () => {
         file.close();
-        console.log(`✅ Generated: ${fileName}`);
-        resolve();
+
+        try {
+          const cloudUrl = await uploadToCloudinary(tempFile);
+
+          fs.unlinkSync(tempFile);
+
+          console.log("✅ Uploaded:", cloudUrl);
+
+          resolve(cloudUrl);
+        } catch (err) {
+          reject(err);
+        }
       });
 
     }).on("error", reject);
